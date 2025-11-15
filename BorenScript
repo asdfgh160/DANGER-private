@@ -1,0 +1,140 @@
+local Translations = {     
+     ["墨水游戏汉化脚本"] = "Boren汉化脚本",
+     ["Info & Credits"] = "信息与致谢",
+     ["BorenHub TEAM - Python / Lua"] = "欢迎你使用汉化Boren脚本，本人在快手上和B站上都有号",
+     ["Thanks for using BorenHub!"] = "by roblox-伊尔德 QQ群555044756",
+     ["Executor: "] = "执行器：",
+     ["Copy"] = "复制",
+     ["Hitbox Expander (only guns)"] = "玩家判定框扩大（仅枪支）",
+     ["Antifall"] = "防坠落",
+     ["VoidKill"] = "虚空击杀",
+     ["Kill spikes (tp hiders to spikes)"] = "尖刺击杀（将躲藏者传送至尖刺）",
+     ["Tp seeker to spikes (3 dodge)"] = "将搜寻者传送至尖刺（3次闪避）",
+     ["JobId"] = "任务ID",
+     ["Rich Millionaira"] = "富裕的亿万富翁",
+     ["StopPlaying"] = "停止游戏",
+     ["Manipulator"] = "操控者",
+     ["The Recruiter"] = "招募者",
+     ["Tanos"] = "塔丿斯",
+     ["The Glass Maker"] = "玻璃制造者",
+     ["Frontman"] = "前锋",
+     ["Squiddler"] = "滑板车",
+     ["Game VIP"] = "游戏贵宾",
+     ["Sackboy"] = "不知道叫啥",
+     ["Him"] = "他",
+     ["Honeycomb Artist"] = "蜂巢艺术家",
+     ["The Chosen One"] = "被选中的人",
+     ["Content Creator"] = "内容创作者",
+     ["Game Developer"] = "游戏开发者",
+     ["Game Administrator"] = "游戏管理员",
+     ["Game Animator"] = "游戏动画师",
+     ["Game Artist"] = "游戏美术师",
+     ["Game Builder"] = "游戏搭建者",
+     ["Game Contributor"] = "游戏贡献者",
+     ["Game Modeller"] = "游戏建模师",
+     ["Game Moderator"] = "游戏调解员",
+     ["Game SFX Designer"] = "游戏音效设计师",
+     ["The Strongest"] = "最强",
+     ["The Perfect Lifeform"] = "完美生命体",
+     ["Voice Actor"] = "配音演员",
+     ["SFX Designer"] = "音效设计师",
+     ["by 晓月lol"] = "伊尔德汉化",
+     ["Toggle"] = "打开/关闭",
+     ["Free Title(NOT FE)"] = "免费头衔（非全功能版）",
+     ["Lock"] = "锁定"
+}
+
+local keys = {}
+for k in pairs(Translations) do
+    table.insert(keys, k)
+end
+table.sort(
+    keys,
+    function(a, b)
+        return #a > #b
+    end
+)
+
+local function safeReplace(text, old, new)
+    local result = ""
+    local start = 1
+    while true do
+        local i, j = string.find(text, old, start, true)
+        if not i then
+            result = result .. string.sub(text, start)
+            break
+        end
+        result = result .. string.sub(text, start, i - 1) .. new
+        start = j + 1
+    end
+    return result
+end
+
+local function translateText(text)
+    if not text or type(text) ~= "string" then
+        return text
+    end
+    for _, k in ipairs(keys) do
+        text = safeReplace(text, k, Translations[k])
+    end
+    return text
+end
+
+-- 修复hookmetamethod的问题
+if getrawmetatable then
+    local oldNewIndex
+    oldNewIndex = hookmetamethod(
+        game,
+        "__newindex",
+        function(self, key, value)
+            if key == "Text" and type(value) == "string" then
+                value = translateText(value)
+            end
+            return oldNewIndex(self, key, value)
+        end
+    )
+else
+    -- 备用方案：直接hook TextLabel和TextButton的Text属性
+    local function hookTextObjects()
+        for _, obj in pairs(game:GetDescendants()) do
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) and obj.Text then
+                local originalText = obj.Text
+                obj.Text = translateText(originalText)
+                
+                -- 监听Text属性变化
+                if not obj:FindFirstChild("BorenTranslationHook") then
+                    local hook = Instance.new("BoolValue")
+                    hook.Name = "BorenTranslationHook"
+                    hook.Parent = obj
+                    
+                    obj:GetPropertyChangedSignal("Text"):Connect(function()
+                        if obj.Text ~= translateText(originalText) then
+                            obj.Text = translateText(obj.Text)
+                        end
+                    end)
+                end
+            end
+        end
+    end
+    
+    -- 初始执行和监听新对象
+    hookTextObjects()
+    game.DescendantAdded:Connect(function(obj)
+        if (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) then
+            wait(0.1) -- 等待对象完全加载
+            if obj.Text then
+                obj.Text = translateText(obj.Text)
+            end
+        end
+    end)
+end
+
+-- 安全加载远程脚本
+local success, result = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/hdjsjjdgrhj/script-hub/refs/heads/main/bored"))()
+end)
+
+if not success then
+    warn("加载脚本时出错: " .. tostring(result))
+    -- 可选：使用备用链接或本地版本
+end
