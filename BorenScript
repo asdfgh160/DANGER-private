@@ -1,5 +1,4 @@
-local Translations = {     
-    ["墨水游戏汉化脚本"] = "Boren汉化脚本",
+local Translations = {        
     ["Info & Credits"] = "信息与致谢",
     ["BorenHub TEAM - Python / Lua"] = "欢迎你使用汉化Boren脚本，本人在快手上和B站上都有号",
     ["Thanks for using BorenHub!"] = "by roblox-伊尔德 QQ群555044756",
