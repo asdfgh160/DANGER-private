@@ -1,1224 +1,1353 @@
---[[
-    YirdeX墨水游戏脚本 - 完整功能版
-    整合了所有墨水游戏功能
-]]
+local NexusLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/NexusUI/main/NexusUI-Library-V2.lua", true))()
 
--- 防止重复加载
-if getgenv().YirdeX_InkGame_Loaded then
-    return
+local window = NexusLibrary:CreateWindow("墨水游戏多功能整合脚本")
+
+if not getgenv().shared then
+    getgenv().shared = {}
 end
-getgenv().YirdeX_InkGame_Loaded = true
 
--- 创建必要的文件夹
-local function setupFolders()
-    local folders = {
-        "YirdeX_Scripts",
-        "YirdeX_Scripts/Themes",
-        "YirdeX_Scripts/Configs",
-        "YirdeX_Scripts/Profiles"
-    }
-    
-    for _, folder in ipairs(folders) do
-        if not isfolder(folder) then
-            makefolder(folder)
+if getgenv().voidware_loaded then
+    pcall(function()
+        if shared.Voidware_InkGame_Library then
+            shared.Voidware_InkGame_Library:Unload()
         end
-    end
+    end)
 end
+getgenv().voidware_loaded = true
 
-pcall(setupFolders)
+pcall(function()
+    if not isfolder("voidware_linoria") then 
+        makefolder("voidware_linoria")
+        makefolder("voidware_linoria/ink_game")
+        makefolder("voidware_linoria/themes")
+        makefolder("voidware_linoria/ink_game/settings")
+        makefolder("voidware_linoria/ink_game/themes")
+        writefile("voidware_linoria/themes/default.txt", "Jester")
+    end
+end)
 
--- 加载库
-local repo = "https://raw.githubusercontent.com/XcRNB/Obsidian-CNHK/main/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+task.spawn(function()
+    pcall(function()
+        if not isfile("Local_VW_Update_Log.json") then
+            shared.UpdateLogBypass = true
+        end
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/VapeVoidware/VWExtra/main/VWUpdateLog.lua", true))()
+        shared.UpdateLogBypass = nil
+    end)
+end)
 
-local Options = Library.Options
-local Toggles = Library.Toggles
-
--- 创建主窗口
-local Window = Library:CreateWindow({
-    Title = "YirdeX-墨水游戏脚本",
-    Footer = "完整版 v2.1 | YirdeX出品",
-    Center = true,
-    AutoShow = true,
-    Resizable = true,
-    ShowCustomCursor = true,
-    TabPadding = 2,
-    MenuFadeTime = 0.1
-})
-
--- 创建选项卡
-local Tabs = {
-    Main = Window:AddTab("主要功能", "gamepad-2"),
-    Visual = Window:AddTab("视觉功能", "eye"),
-    Player = Window:AddTab("玩家增强", "user"),
-    Auto = Window:AddTab("自动游戏", "zap"),
-    Misc = Window:AddTab("杂项功能", "wrench"),
-    UISettings = Window:AddTab("UI设置", "settings")
-}
-
--- 游戏服务
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
-local VirtualUser = game:GetService("VirtualUser")
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
+local lplr = Players.LocalPlayer
+local localPlayer = lplr
+local camera = workspace.CurrentCamera
 
--- 全局变量
 local Script = {
+    GameStateChanged = Instance.new("BindableEvent"),
+    GameState = "unknown",
     Maid = {},
     Connections = {},
-    ESPTable = {},
-    Temp = {},
-    GameState = "未知",
-    ESPInstances = {}
+    Functions = {},
+    ESPTable = {
+        Player = {},
+        Seeker = {},
+        Hider = {},
+        Guard = {},
+        Door = {},
+        Key = {},
+        EscapeDoor = {}
+    },
+    Temp = {}
 }
 
--- 清理函数
-function Script.Cleanup()
-    for _, connection in pairs(Script.Connections) do
-        pcall(function() connection:Disconnect() end)
-    end
-    for _, object in pairs(Script.Maid) do
-        pcall(function() object:Destroy() end)
-    end
-    for _, esp in pairs(Script.ESPInstances) do
-        pcall(function() esp:Destroy() end)
-    end
-    table.clear(Script.Connections)
-    table.clear(Script.Maid)
-    table.clear(Script.ESPTable)
-    table.clear(Script.Temp)
-    table.clear(Script.ESPInstances)
+function Script.Functions.Alert(message, duration)
+    window:ShowNotification(message, duration or 5)
+    local sound = Instance.new("Sound", workspace)
+    sound.SoundId = "rbxassetid://4590662766"
+    sound.Volume = 2
+    sound.PlayOnRemove = true
+    sound:Destroy()
 end
 
--- 通知函数
-function Script.Notify(message, duration)
-    Library:Notify(message, duration or 3)
+function Script.Functions.Warn(message)
+    warn("WARN - voidware:", message)
 end
 
--- ================================
--- ESP绘制系统
--- ================================
-function Script.CreateESP(object, color, name, offset)
-    if not object or not object:IsDescendantOf(Workspace) then return end
-    
-    local esp = {}
-    esp.Object = object
-    esp.Color = color
-    
-    -- 创建高亮
+function Script.Functions.SafeRequire(module)
+    if Script.Temp[tostring(module)] then return Script.Temp[tostring(module)] end
+    local suc, err = pcall(function()
+        return require(module)
+    end)
+    if suc then
+        Script.Temp[tostring(module)] = err
+        return err
+    else
+        warn("[SafeRequire]: Failure loading "..tostring(module).." ("..tostring(err)..")")
+        return nil
+    end
+end
+
+function Script.Functions.JoinDiscordServer()
+    local sInvite = "https://discord.com/invite/voidware"
+    pcall(function()
+        setclipboard("discord.gg/voidware")
+    end)
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "复制NOL dc - discord.gg/voidware",
+        Text = "加入我们dc群 (discord.gg/voidware)",
+        Duration = 10,
+    })
+end
+
+function Script.Functions.GetRootPart()
+    if not lplr.Character then return end
+    local rp = lplr.Character:WaitForChild("HumanoidRootPart", 10)
+    return rp
+end
+
+function Script.Functions.GetHumanoid()
+    if not lplr.Character then return end
+    local rp = lplr.Character:WaitForChild("Humanoid", 10)
+    return rp
+end
+
+function Script.Functions.FixCamera()
+    if workspace.CurrentCamera then
+        pcall(function()
+            workspace.CurrentCamera:Destroy()
+        end)
+    end
+    local new = Instance.new("Camera")
+    new.Parent = workspace
+    workspace.CurrentCamera = new
+    new.CameraType = Enum.CameraType.Custom
+    if lplr.Character and lplr.Character:FindFirstChild("Humanoid") then
+        new.CameraSubject = lplr.Character.Humanoid
+    end
+end
+
+function Script.Functions.DistanceFromCharacter(position)
+    if typeof(position) == "Instance" then
+        position = position:GetPivot().Position
+    end
+
+    if not lplr.Character or not lplr.Character:FindFirstChild("HumanoidRootPart") then
+        return (camera.CFrame.Position - position).Magnitude
+    end
+
+    return (lplr.Character.HumanoidRootPart.Position - position).Magnitude
+end
+
+local ESPConfig = {
+    Highlight = true,
+    ShowDistance = true,
+    FillTransparency = 0.75,
+    OutlineTransparency = 0,
+    TextSize = 22
+}
+
+function Script.Functions.ESP(args)
+    if not args.Object then return Script.Functions.Warn("ESP Object is nil") end
+
+    local ESPManager = {
+        Object = args.Object,
+        Text = args.Text or "No Text",
+        TextParent = args.TextParent,
+        Color = args.Color or Color3.new(),
+        Offset = args.Offset or Vector3.zero,
+        IsEntity = args.IsEntity or false,
+        Type = args.Type or "None",
+        Highlights = {},
+        RSConnection = nil
+    }
+
+    local tableIndex = #Script.ESPTable[ESPManager.Type] + 1
+
+    if ESPManager.IsEntity and ESPManager.Object.PrimaryPart and ESPManager.Object.PrimaryPart.Transparency == 1 then
+        ESPManager.Object:SetAttribute("Transparency", ESPManager.Object.PrimaryPart.Transparency)
+        ESPManager.Object.PrimaryPart.Transparency = 0.99
+    end
+
     local highlight = Instance.new("Highlight")
-    highlight.Adornee = object
-    highlight.FillColor = color
-    highlight.OutlineColor = color
-    highlight.FillTransparency = Options.ESP_FillTransparency.Value
-    highlight.OutlineTransparency = Options.ESP_OutlineTransparency.Value
-    highlight.Enabled = Toggles.ESP_Highlight.Value
-    highlight.Parent = object
-    
-    -- 创建文字标签
-    local billboard = Instance.new("BillboardGui")
-    billboard.Adornee = object
-    billboard.Size = UDim2.new(0, 100, 0, 50)
-    billboard.StudsOffset = offset or Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop = true
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = name
-    label.TextColor3 = color
-    label.TextSize = Options.ESP_TextSize.Value
-    label.Font = Enum.Font.GothamBold
-    label.Parent = billboard
-    
-    billboard.Parent = object
-    
-    esp.Highlight = highlight
-    esp.Billboard = billboard
-    
-    -- 更新函数
-    function esp.Update()
-        if not object or not object:IsDescendantOf(Workspace) then
-            esp.Destroy()
+    highlight.Adornee = ESPManager.Object
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = ESPManager.Color
+    highlight.FillTransparency = ESPConfig.FillTransparency
+    highlight.OutlineColor = ESPManager.Color
+    highlight.OutlineTransparency = ESPConfig.OutlineTransparency
+    highlight.Enabled = ESPConfig.Highlight
+    highlight.Parent = ESPManager.Object
+
+    table.insert(ESPManager.Highlights, highlight)
+
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Adornee = ESPManager.TextParent or ESPManager.Object
+    billboardGui.AlwaysOnTop = true
+    billboardGui.ClipsDescendants = false
+    billboardGui.Size = UDim2.new(0, 1, 0, 1)
+    billboardGui.StudsOffset = ESPManager.Offset
+    billboardGui.Parent = ESPManager.TextParent or ESPManager.Object
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.BackgroundTransparency = 1
+    textLabel.Font = Enum.Font.Oswald
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.Text = ESPManager.Text
+    textLabel.TextColor3 = ESPManager.Color
+    textLabel.TextSize = ESPConfig.TextSize
+    textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    textLabel.TextStrokeTransparency = 0.75
+    textLabel.Parent = billboardGui
+
+    function ESPManager.SetColor(newColor)
+        ESPManager.Color = newColor
+        for _, highlight in pairs(ESPManager.Highlights) do
+            highlight.FillColor = newColor
+            highlight.OutlineColor = newColor
+        end
+        textLabel.TextColor3 = newColor
+    end
+
+    function ESPManager.Destroy()
+        if ESPManager.RSConnection then
+            ESPManager.RSConnection:Disconnect()
+        end
+        if ESPManager.IsEntity and ESPManager.Object and ESPManager.Object.PrimaryPart then
+            ESPManager.Object.PrimaryPart.Transparency = ESPManager.Object.PrimaryPart:GetAttribute("Transparency") or 1
+        end
+        for _, highlight in pairs(ESPManager.Highlights) do
+            highlight:Destroy()
+        end
+        if billboardGui then billboardGui:Destroy() end
+        if Script.ESPTable[ESPManager.Type][tableIndex] then
+            Script.ESPTable[ESPManager.Type][tableIndex] = nil
+        end
+    end
+
+    ESPManager.RSConnection = RunService.RenderStepped:Connect(function()
+        if not ESPManager.Object or not ESPManager.Object:IsDescendantOf(workspace) then
+            ESPManager.Destroy()
             return
         end
-        
-        highlight.Enabled = Toggles.ESP_Highlight.Value
-        highlight.FillTransparency = Options.ESP_FillTransparency.Value
-        highlight.OutlineTransparency = Options.ESP_OutlineTransparency.Value
-        highlight.FillColor = color
-        highlight.OutlineColor = color
-        
-        label.TextSize = Options.ESP_TextSize.Value
-        label.TextColor3 = color
-        
-        if Toggles.ESP_ShowDistance.Value and LocalPlayer.Character then
-            local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root then
-                local distance = math.floor((root.Position - object.Position).Magnitude)
-                label.Text = string.format("%s\n[%d]", name, distance)
-            end
+        for _, highlight in pairs(ESPManager.Highlights) do
+            highlight.Enabled = ESPConfig.Highlight
+            highlight.FillTransparency = ESPConfig.FillTransparency
+            highlight.OutlineTransparency = ESPConfig.OutlineTransparency
+        end
+        textLabel.TextSize = ESPConfig.TextSize
+        if ESPConfig.ShowDistance then
+            textLabel.Text = string.format("%s\n[%s]", ESPManager.Text, math.floor(Script.Functions.DistanceFromCharacter(ESPManager.Object)))
         else
-            label.Text = name
-        end
-    end
-    
-    function esp.Destroy()
-        if highlight then highlight:Destroy() end
-        if billboard then billboard:Destroy() end
-        if Script.ESPInstances[esp] then
-            Script.ESPInstances[esp] = nil
-        end
-    end
-    
-    Script.ESPInstances[esp] = esp
-    return esp
-end
-
--- 创建ESP管理循环
-function Script.StartESPLoop()
-    if Script.Connections.ESPLoop then return end
-    
-    Script.Connections.ESPLoop = RunService.RenderStepped:Connect(function()
-        for _, esp in pairs(Script.ESPInstances) do
-            esp.Update()
+            textLabel.Text = ESPManager.Text
         end
     end)
+
+    Script.ESPTable[ESPManager.Type][tableIndex] = ESPManager
+    return ESPManager
 end
 
--- 添加玩家ESP
-function Script.AddPlayerESP(player)
-    if player == LocalPlayer then return end
+local function updateESPConfig()
+    for _, espType in pairs(Script.ESPTable) do
+        for _, esp in pairs(espType) do
+            if esp.SetColor then
+                pcall(esp.SetColor, esp.Color)
+            end
+        end
+    end
+end
+
+local GameStates = {}
+local CurrentGameCheats = {}
+
+function Script.Functions.WinRLGL()
+    if not lplr.Character then return end
+    lplr.Character:PivotTo(CFrame.new(Vector3.new(-100.8, 1030, 115)))
+    Script.Functions.Alert("已传送到终点!", 3)
+end
+
+function Script.Functions.CompleteDalgonaGame()
+    local args = {
+        "Clicked"
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Replication"):WaitForChild("Event"):FireServer(unpack(args))
     
-    local character = player.Character
+    local args2 = {
+        {
+            Completed = true
+        }
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("DALGONATEMPREMPTE"):FireServer(unpack(args2))
+    
+    local args3 = {
+        {
+            Success = true
+        }
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("DALGONATEMPREMPTE"):FireServer(unpack(args3))
+end
+
+function Script.Functions.PullRope(perfect)
+    local args = {
+        {
+            PerfectQTE = true
+        }
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("TemporaryReachedBindable"):FireServer(unpack(args))
+end
+
+function Script.Functions.RevealGlassBridge()
+    local glassHolder = workspace:FindFirstChild("GlassBridge") and workspace.GlassBridge:FindFirstChild("GlassHolder")
+    if not glassHolder then return end
+
+    for _, tilePair in pairs(glassHolder:GetChildren()) do
+        for _, tileModel in pairs(tilePair:GetChildren()) do
+            if tileModel:IsA("Model") and tileModel.PrimaryPart then
+                local primaryPart = tileModel.PrimaryPart
+                local isBreakable = primaryPart:GetAttribute("exploitingisevil") == true
+                local targetColor = isBreakable and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0)
+                
+                for _, part in pairs(tileModel:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        TweenService:Create(part, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {
+                            Transparency = 0.5,
+                            Color = targetColor
+                        }):Play()
+                    end
+                end
+            end
+        end
+    end
+    Script.Functions.Alert("安全玻璃是绿色的，易碎玻璃是红色的!", 10)
+end
+
+function Script.Functions.WinGlassBridge()
+    if not lplr.Character then return end
+    lplr.Character:PivotTo(CFrame.new(Vector3.new(-203.9, 520.7, -1534.3485)))
+    Script.Functions.Alert("已传送到玻璃桥终点!", 3)
+end
+
+function Script.Functions.BypassRagdoll()
+    local character = lplr.Character
     if not character then return end
     
+    for _, child in ipairs(character:GetChildren()) do
+        if child.Name == "Ragdoll" then
+            pcall(function() child:Destroy() end)
+        end
+    end
+
     local humanoid = character:FindFirstChild("Humanoid")
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not root then return end
-    
-    local color = Options.ESP_PlayerColor.Value
-    local esp = Script.CreateESP(character, color, player.Name, Vector3.new(0, 3, 0))
-    
-    -- 监听玩家变化
-    local healthConnection = humanoid.HealthChanged:Connect(function(health)
-        if esp and esp.Billboard and esp.Billboard:FindFirstChild("TextLabel") then
-            esp.Billboard.TextLabel.Text = string.format("%s\nHP: %d", player.Name, math.floor(health))
-        end
-    end)
-    
-    Script.Maid[player] = healthConnection
-end
-
--- 更新所有ESP
-function Script.UpdateAllESP()
-    for _, esp in pairs(Script.ESPInstances) do
-        esp.Update()
+    if humanoid then
+        humanoid.PlatformStand = false
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
     end
 end
 
--- ================================
--- 玩家ESP功能
--- ================================
-Toggles.ESP_Player:OnChanged(function(value)
-    if value then
-        -- 为所有玩家添加ESP
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                if player.Character then
-                    Script.AddPlayerESP(player)
-                end
-                -- 监听新角色
-                Script.Connections[player] = player.CharacterAdded:Connect(function()
-                    task.wait(1)
-                    Script.AddPlayerESP(player)
-                end)
-            end
-        end
-        
-        -- 监听新玩家
-        Script.Connections.PlayerAdded = Players.PlayerAdded:Connect(function(player)
-            task.wait(2)
-            Script.AddPlayerESP(player)
-        end)
-        
-        Script.StartESPLoop()
-        Script.Notify("玩家ESP已启用", 3)
-    else
-        -- 清理ESP
-        for _, esp in pairs(Script.ESPInstances) do
-            esp.Destroy()
-        end
-        table.clear(Script.ESPInstances)
-        
-        -- 清理连接
-        for name, conn in pairs(Script.Connections) do
-            if name ~= "ESPLoop" then
-                pcall(function() conn:Disconnect() end)
-                Script.Connections[name] = nil
-            end
-        end
-        
-        Script.Notify("玩家ESP已禁用", 3)
-    end
-end)
-
--- ================================
--- 主要功能选项卡
--- ================================
-local MainGroup = Tabs.Main:AddLeftGroupbox("游戏功能")
-
--- 红绿灯上帝模式
-local RLGL_GodModeActive = false
-local RLGL_OriginalNamecall
-Toggles.RLGL_GodMode:OnChanged(function(value)
-    if value then
-        -- 检查是否在红绿灯游戏中
-        if not Workspace:FindFirstChild("RedLightGreenLight") then
-            Script.Notify("红绿灯游戏未开始", 3)
-            Toggles.RLGL_GodMode:SetValue(false)
-            return
-        end
-        
-        Script.Notify("红绿灯上帝模式已启用", 3)
-        RLGL_GodModeActive = true
-        
-        -- 保存当前位置
-        if LocalPlayer.Character then
-            Script.Temp.RLGL_SavedPosition = LocalPlayer.Character:GetPivot()
-        end
-        
-        -- 监听位置变化
-        Script.Connections.RLGL_Heartbeat = RunService.Heartbeat:Connect(function()
-            if not RLGL_GodModeActive then return end
-            if LocalPlayer.Character then
-                Script.Temp.RLGL_SavedPosition = LocalPlayer.Character:GetPivot()
-            end
-        end)
-        
-        -- Hook网络调用防止死亡
-        if hookmetamethod then
-            RLGL_OriginalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-                local args = {...}
-                local method = getnamecallmethod()
-                
-                if tostring(self) == "rootCFrame" and method == "FireServer" then
-                    if RLGL_GodModeActive and Script.Temp.RLGL_SavedPosition then
-                        args[1] = Script.Temp.RLGL_SavedPosition
-                    end
-                end
-                
-                return RLGL_OriginalNamecall(self, unpack(args))
-            end)
-        end
-    else
-        RLGL_GodModeActive = false
-        if Script.Connections.RLGL_Heartbeat then
-            Script.Connections.RLGL_Heartbeat:Disconnect()
-        end
-        
-        if RLGL_OriginalNamecall then
-            hookmetamethod(game, "__namecall", RLGL_OriginalNamecall)
-        end
-        
-        Script.Notify("红绿灯上帝模式已禁用", 3)
-    end
-end)
-
--- 瞬间通关红绿灯
-MainGroup:AddButton("RLGL_InstantWin", {
-    Text = "瞬间通关",
-    Func = function()
-        if not Workspace:FindFirstChild("RedLightGreenLight") then
-            Script.Notify("红绿灯游戏未开始", 3)
-            return
-        end
-        
-        local character = LocalPlayer.Character
-        if character then
-            -- 先禁用上帝模式以免冲突
-            if Toggles.RLGL_GodMode.Value then
-                Toggles.RLGL_GodMode:SetValue(false)
-                wait(0.1)
-            end
-            
-            -- 传送到终点
-            local success = pcall(function()
-                character:PivotTo(CFrame.new(Vector3.new(-100.8, 1030, 115)))
-            end)
-            
-            if success then
-                Script.Notify("已传送到红绿灯终点", 3)
-            else
-                Script.Notify("传送失败", 3)
-            end
-        else
-            Script.Notify("角色不存在", 3)
-        end
-    end,
-    Tooltip = "瞬间传送到终点"
-})
-
--- 扣糖饼功能
-Toggles.Dalgona_Immune:OnChanged(function(value)
-    if value then
-        Script.Notify("糖饼免疫已启用", 3)
-        -- 这里可以添加免疫代码
-    else
-        Script.Notify("糖饼免疫已禁用", 3)
-    end
-end)
-
-MainGroup:AddButton("Dalgona_InstantWin", {
-    Text = "瞬间完成糖饼",
-    Func = function()
-        local remote = ReplicatedStorage:FindFirstChild("Remotes"):FindFirstChild("DALGONATEMPREMPTE")
-        if not remote then
-            Script.Notify("糖饼游戏未开始", 3)
-            return
-        end
-        
-        -- 发送完成信号
-        remote:FireServer({Success = true})
-        remote:FireServer({Completed = true})
-        
-        -- 执行绕过
-        local character = LocalPlayer.Character
-        if character then
-            -- 透明化角色
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.Transparency = 1
-                end
-            end
-            
-            -- 修复相机
-            if Camera then
-                Camera.CameraType = Enum.CameraType.Custom
-                Camera.CameraSubject = character:FindFirstChild("Humanoid")
-            end
-        end
-        
-        Script.Notify("糖饼游戏已完成", 3)
-    end
-})
-
--- 拔河功能
-Toggles.TugOfWar_Auto:OnChanged(function(value)
-    if value then
-        Script.Notify("自动拔河已启用", 3)
-        Script.Connections.TugOfWar = RunService.Heartbeat:Connect(function()
-            if not Toggles.TugOfWar_Auto.Value then return end
-            
-            local remote = ReplicatedStorage:FindFirstChild("Remotes"):FindFirstChild("TemporaryReachedBindable")
-            if remote then
-                local args = {
-                    {PerfectQTE = Toggles.TugOfWar_Perfect.Value}
-                }
-                remote:FireServer(unpack(args))
-            end
-        end)
-    else
-        if Script.Connections.TugOfWar then
-            Script.Connections.TugOfWar:Disconnect()
-        end
-        Script.Notify("自动拔河已禁用", 3)
-    end
-})
-
--- 玻璃桥功能
-MainGroup:AddButton("GlassBridge_ShowSafe", {
-    Text = "显示安全玻璃",
-    Func = function()
-        if not Workspace:FindFirstChild("GlassBridge") then
-            Script.Notify("玻璃桥游戏未开始", 3)
-            return
-        end
-        
-        -- 显示安全玻璃
-        local glassHolder = Workspace.GlassBridge:FindFirstChild("GlassHolder")
-        if glassHolder then
-            for _, tilePair in pairs(glassHolder:GetChildren()) do
-                for _, tileModel in pairs(tilePair:GetChildren()) do
-                    if tileModel:IsA("Model") and tileModel.PrimaryPart then
-                        local isBreakable = tileModel.PrimaryPart:GetAttribute("exploitingisevil") == true
-                        local color = isBreakable and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0)
-                        
-                        -- 创建高亮
-                        local highlight = Instance.new("Highlight")
-                        highlight.Adornee = tileModel
-                        highlight.FillColor = color
-                        highlight.FillTransparency = 0.5
-                        highlight.OutlineColor = color
-                        highlight.OutlineTransparency = 0
-                        highlight.Parent = tileModel
-                        
-                        Script.Maid[tileModel] = highlight
-                    end
+local function getNearestEnemy(maxDist)
+    maxDist = maxDist or 15
+    local closest, closestDist = nil, math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= lplr and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") then
+            local hum = player.Character.Humanoid
+            if hum.Health > 0 then
+                local dist = (lplr.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+                if dist < closestDist and dist <= maxDist then
+                    closest = player.Character.HumanoidRootPart
+                    closestDist = dist
                 end
             end
         end
-        
-        Script.Notify("已显示玻璃桥安全/危险区域", 5)
     end
-})
+    return closest
+end
 
-MainGroup:AddButton("GlassBridge_InstantWin", {
-    Text = "瞬间通关",
-    Func = function()
-        local character = LocalPlayer.Character
-        if character then
-            local success = pcall(function()
-                character:PivotTo(CFrame.new(Vector3.new(-203.9, 520.7, -1534.3485)))
-            end)
-            
-            if success then
-                Script.Notify("已传送到玻璃桥终点", 3)
-            else
-                Script.Notify("传送失败", 3)
-            end
-        end
-    end
-})
-
--- 捉迷藏功能
-Toggles.HideSeek_InfiniteStamina:OnChanged(function(value)
-    if value then
-        Script.Notify("无限体力已启用", 3)
-        Script.Connections.InfiniteStamina = RunService.Heartbeat:Connect(function()
-            local character = LocalPlayer.Character
-            if character then
-                local stamina = character:FindFirstChild("StaminaVal")
-                if stamina then
-                    stamina.Value = 100
+local function getNearestGuard(maxDist)
+    maxDist = maxDist or 50
+    local closest, closestDist = nil, math.huge
+    local live = workspace:FindFirstChild("Live")
+    if not live then return end
+    
+    for _, model in pairs(live:GetChildren()) do
+        if model:IsA("Model") and model:FindFirstChild("TypeOfGuard") then
+            local part = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+            if part then
+                local dist = (lplr.Character.HumanoidRootPart.Position - part.Position).Magnitude
+                if dist < closestDist and dist <= maxDist then
+                    closest = part
+                    closestDist = dist
                 end
             end
-        end)
-    else
-        if Script.Connections.InfiniteStamina then
-            Script.Connections.InfiniteStamina:Disconnect()
-        end
-        Script.Notify("无限体力已禁用", 3)
-    end
-end)
-
-MainGroup:AddButton("HideSeek_TPToHider", {
-    Text = "传送到躲藏者",
-    Func = function()
-        local hider
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player:GetAttribute("IsHider") then
-                hider = player
-                break
-            end
-        end
-        
-        if hider and hider.Character then
-            local success = pcall(function()
-                LocalPlayer.Character:PivotTo(hider.Character:GetPrimaryPartCFrame())
-            end)
-            
-            if success then
-                Script.Notify("已传送到躲藏者", 3)
-            else
-                Script.Notify("传送失败", 3)
-            end
-        else
-            Script.Notify("未找到躲藏者", 3)
         end
     end
-})
+    return closest
+end
 
--- ================================
--- 玩家增强功能
--- ================================
+local PlayerSettings = {
+    Speed = {
+        Enabled = false,
+        Value = 30,
+        OldSpeed = 16
+    },
+    Noclip = {
+        Enabled = false,
+        NoclipParts = {}
+    },
+    Fly = {
+        Enabled = false,
+        Speed = 40,
+        BodyVelocity = nil
+    },
+    InfiniteJump = {
+        Enabled = false
+    },
+    AntiFling = {
+        Enabled = false
+    },
+    AntiVoid = {
+        Enabled = false,
+        Part = nil
+    },
+    AntiAfk = {
+        Enabled = true
+    },
+    Fullbright = {
+        Enabled = false,
+        OriginalSettings = {}
+    }
+}
 
--- 速度修改
-local OriginalWalkSpeed = 16
-Toggles.Speed_Toggle:OnChanged(function(value)
-    local character = LocalPlayer.Character
-    if character and character:FindFirstChild("Humanoid") then
-        if value then
-            OriginalWalkSpeed = character.Humanoid.WalkSpeed
-            character.Humanoid.WalkSpeed = Options.Speed_Value.Value
-            Script.Connections.SpeedUpdate = Options.Speed_Value:OnChanged(function(val)
-                if Toggles.Speed_Toggle.Value then
-                    character.Humanoid.WalkSpeed = val
-                end
-            end)
-            Script.Notify("速度修改已启用: " .. Options.Speed_Value.Value, 3)
-        else
-            character.Humanoid.WalkSpeed = OriginalWalkSpeed
-            if Script.Connections.SpeedUpdate then
-                Script.Connections.SpeedUpdate:Disconnect()
-            end
-            Script.Notify("速度修改已禁用", 3)
+local function applySpeed()
+    if not PlayerSettings.Speed.Enabled or not lplr.Character then return end
+    local humanoid = lplr.Character:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = PlayerSettings.Speed.Value
+    end
+end
+
+local function applyNoclip()
+    if not PlayerSettings.Noclip.Enabled or not lplr.Character then return end
+    for _, child in pairs(lplr.Character:GetDescendants()) do
+        if child:IsA("BasePart") and child.CanCollide == true then
+            child.CanCollide = false
+            PlayerSettings.Noclip.NoclipParts[child] = true
         end
     end
-end)
+end
 
--- 穿墙模式
-Toggles.Noclip_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("穿墙模式已启用", 3)
-        Script.Connections.Noclip = RunService.Stepped:Connect(function()
-            local character = LocalPlayer.Character
-            if character then
-                for _, part in ipairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end)
-    else
-        if Script.Connections.Noclip then
-            Script.Connections.Noclip:Disconnect()
+local function removeNoclip()
+    for part, _ in pairs(PlayerSettings.Noclip.NoclipParts) do
+        if part and part:IsA("BasePart") then
+            part.CanCollide = true
         end
-        Script.Notify("穿墙模式已禁用", 3)
     end
-end)
+    PlayerSettings.Noclip.NoclipParts = {}
+end
 
--- 无限跳跃
-Toggles.InfiniteJump_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("无限跳跃已启用", 3)
-        Script.Connections.InfiniteJump = UserInputService.JumpRequest:Connect(function()
-            local character = LocalPlayer.Character
-            if character and character:FindFirstChild("Humanoid") then
-                character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
-        end)
-    else
-        if Script.Connections.InfiniteJump then
-            Script.Connections.InfiniteJump:Disconnect()
+local function applyFly()
+    if not PlayerSettings.Fly.Enabled then
+        if PlayerSettings.Fly.BodyVelocity then
+            PlayerSettings.Fly.BodyVelocity:Destroy()
+            PlayerSettings.Fly.BodyVelocity = nil
         end
-        Script.Notify("无限跳跃已禁用", 3)
+        return
     end
-end)
-
--- 飞行模式
-local FlyBodyVelocity
-Toggles.Fly_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("飞行模式已启用", 3)
-        
-        local character = LocalPlayer.Character
-        if not character then return end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        local root = character:FindFirstChild("HumanoidRootPart")
-        
-        if not humanoid or not root then return end
-        
-        -- 启用平台站立
+    
+    local rootPart = Script.Functions.GetRootPart()
+    if not rootPart then return end
+    
+    local humanoid = Script.Functions.GetHumanoid()
+    if humanoid then
         humanoid.PlatformStand = true
-        
-        -- 创建BodyVelocity
-        FlyBodyVelocity = Instance.new("BodyVelocity")
-        FlyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-        FlyBodyVelocity.MaxForce = Vector3.new(40000, 40000, 40000)
-        FlyBodyVelocity.P = 1250
-        FlyBodyVelocity.Parent = root
-        
-        -- 飞行控制
-        Script.Connections.FlyControl = RunService.RenderStepped:Connect(function()
-            if not Toggles.Fly_Toggle.Value or not FlyBodyVelocity then return end
-            
-            local moveDirection = Vector3.new(0, 0, 0)
-            local speed = Options.Fly_Speed.Value
-            
-            -- 获取输入方向
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                moveDirection = moveDirection + Camera.CFrame.LookVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                moveDirection = moveDirection - Camera.CFrame.LookVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                moveDirection = moveDirection - Camera.CFrame.RightVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                moveDirection = moveDirection + Camera.CFrame.RightVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                moveDirection = moveDirection + Vector3.new(0, 1, 0)
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                moveDirection = moveDirection - Vector3.new(0, 1, 0)
-            end
-            
-            -- 更新速度
-            if moveDirection.Magnitude > 0 then
-                moveDirection = moveDirection.Unit * speed
-                FlyBodyVelocity.Velocity = moveDirection
-            else
-                FlyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-            end
-        end)
-    else
-        -- 禁用飞行
-        if FlyBodyVelocity then
-            FlyBodyVelocity:Destroy()
-            FlyBodyVelocity = nil
-        end
-        
-        if Script.Connections.FlyControl then
-            Script.Connections.FlyControl:Disconnect()
-        end
-        
-        local character = LocalPlayer.Character
-        if character and character:FindFirstChild("Humanoid") then
-            character.Humanoid.PlatformStand = false
-        end
-        
-        Script.Notify("飞行模式已禁用", 3)
-    end
-end)
-
--- 杀戮光环
-Toggles.Killaura_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("杀戮光环已启用", 3)
-        
-        Script.Connections.Killaura = RunService.Heartbeat:Connect(function()
-            if not Toggles.Killaura_Toggle.Value then return end
-            
-            local character = LocalPlayer.Character
-            if not character then return end
-            
-            local root = character:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-            
-            -- 寻找最近的目标
-            local nearestTarget = nil
-            local nearestDistance = 15 -- 攻击范围
-            
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character then
-                    local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                    local humanoid = player.Character:FindFirstChild("Humanoid")
-                    
-                    if targetRoot and humanoid and humanoid.Health > 0 then
-                        local distance = (root.Position - targetRoot.Position).Magnitude
-                        if distance < nearestDistance then
-                            nearestTarget = targetRoot
-                            nearestDistance = distance
-                        end
-                    end
-                end
-            end
-            
-            -- 攻击目标
-            if nearestTarget then
-                -- 面向目标（如果开启静默瞄准）
-                if Toggles.SilentAim_Toggle.Value then
-                    local direction = (nearestTarget.Position - root.Position).Unit
-                    root.CFrame = CFrame.new(root.Position, root.Position + direction)
-                end
-                
-                -- 寻找武器并攻击
-                local tool = Script.GetWeapon()
-                if tool then
-                    Script.AttackWithWeapon(tool, nearestTarget.Position)
-                end
-            end
-        end)
-    else
-        if Script.Connections.Killaura then
-            Script.Connections.Killaura:Disconnect()
-        end
-        Script.Notify("杀戮光环已禁用", 3)
-    end
-end)
-
--- 辅助函数：获取武器
-function Script.GetWeapon()
-    local character = LocalPlayer.Character
-    if not character then return nil end
-    
-    -- 检查角色手中的武器
-    for _, tool in ipairs(character:GetChildren()) do
-        if tool:IsA("Tool") then
-            return tool
-        end
     end
     
-    -- 检查背包
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if backpack then
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") then
-                return tool
-            end
-        end
+    if not PlayerSettings.Fly.BodyVelocity then
+        PlayerSettings.Fly.BodyVelocity = Instance.new("BodyVelocity")
+        PlayerSettings.Fly.BodyVelocity.Velocity = Vector3.zero
+        PlayerSettings.Fly.BodyVelocity.MaxForce = Vector3.one * 9e9
+        PlayerSettings.Fly.BodyVelocity.Parent = rootPart
     end
     
-    return nil
-end
-
--- 辅助函数：使用武器攻击
-function Script.AttackWithWeapon(tool, targetPosition)
-    -- 确保武器在手中
-    if tool.Parent ~= LocalPlayer.Character then
-        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:EquipTool(tool)
-        end
-    end
-    
-    -- 发送攻击请求
-    local remote = ReplicatedStorage:FindFirstChild("Remotes"):FindFirstChild("UsedTool")
-    if remote then
-        local args = {
-            "UsingMoveCustom",
-            tool,
-            true,
-            {Clicked = true}
-        }
-        remote:FireServer(unpack(args))
+    local controlModule = Script.Functions.SafeRequire(lplr:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
+    if controlModule then
+        local moveVector = controlModule:GetMoveVector()
+        local velocity = -((camera.CFrame.LookVector * moveVector.Z) - (camera.CFrame.RightVector * moveVector.X)) * PlayerSettings.Fly.Speed
+        PlayerSettings.Fly.BodyVelocity.Velocity = velocity
     end
 end
 
--- 静默瞄准
-Toggles.SilentAim_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("静默瞄准已启用", 3)
+local function applyAntiVoid()
+    if not PlayerSettings.AntiVoid.Enabled then
+        if PlayerSettings.AntiVoid.Part then
+            PlayerSettings.AntiVoid.Part:Destroy()
+            PlayerSettings.AntiVoid.Part = nil
+        end
+        return
+    end
+    
+    if not PlayerSettings.AntiVoid.Part then
+        PlayerSettings.AntiVoid.Part = Instance.new("Part")
+        PlayerSettings.AntiVoid.Part.Size = Vector3.new(10000, 1, 10000)
+        PlayerSettings.AntiVoid.Part.Transparency = 0.5
+        PlayerSettings.AntiVoid.Part.Material = Enum.Material.ForceField
+        PlayerSettings.AntiVoid.Part.Color = Color3.fromRGB(0, 255, 255)
+        PlayerSettings.AntiVoid.Part.CanCollide = true
+        PlayerSettings.AntiVoid.Part.Anchored = true
+        PlayerSettings.AntiVoid.Part.CanQuery = false
+        PlayerSettings.AntiVoid.Part.Parent = workspace
         
-        Script.Connections.SilentAim = RunService.RenderStepped:Connect(function()
-            if not Toggles.SilentAim_Toggle.Value then return end
-            
-            local character = LocalPlayer.Character
-            if not character then return end
-            
-            local root = character:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-            
-            -- 寻找最近的玩家
-            local nearestTarget = nil
-            local nearestDistance = math.huge
-            
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character then
-                    local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                    local humanoid = player.Character:FindFirstChild("Humanoid")
-                    
-                    if targetRoot and humanoid and humanoid.Health > 0 then
-                        local distance = (root.Position - targetRoot.Position).Magnitude
-                        if distance < nearestDistance and distance < 100 then
-                            if Toggles.Aimbot_Wallcheck.Value then
-                                -- 墙壁检测
-                                local raycastResult = workspace:Raycast(
-                                    root.Position,
-                                    (targetRoot.Position - root.Position).Unit * distance,
-                                    {character}
-                                )
-                                if not raycastResult then
-                                    nearestTarget = targetRoot
-                                    nearestDistance = distance
-                                end
-                            else
-                                nearestTarget = targetRoot
-                                nearestDistance = distance
-                            end
-                        end
-                    end
+        local debounce = tick()
+        PlayerSettings.AntiVoid.Part.Touched:Connect(function(touchedPart)
+            if touchedPart.Parent == lplr.Character and lplr.Character:FindFirstChild("Humanoid") and lplr.Character.Humanoid.Health > 0 and debounce < tick() then
+                local rootPart = lplr.Character:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    debounce = tick() + 0.1
+                    rootPart.Velocity = Vector3.new(rootPart.Velocity.X, 100, rootPart.Velocity.Z)
                 end
             end
-            
-            -- 瞄准目标
-            if nearestTarget then
-                local direction = (nearestTarget.Position - root.Position).Unit
-                local aimSpeed = Options.Aimbot_Speed.Value
-                
-                -- 平滑瞄准
-                local currentLook = root.CFrame.LookVector
-                local targetLook = direction
-                local smoothedLook = currentLook:Lerp(targetLook, aimSpeed)
-                
-                root.CFrame = CFrame.new(root.Position, root.Position + smoothedLook)
-            end
         end)
-    else
-        if Script.Connections.SilentAim then
-            Script.Connections.SilentAim:Disconnect()
-        end
-        Script.Notify("静默瞄准已禁用", 3)
     end
-end)
+end
 
--- ================================
--- 杂项功能
--- ================================
-
--- 全亮模式
-Toggles.Fullbright_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("全亮模式已启用", 3)
+local function applyFullbright()
+    if PlayerSettings.Fullbright.Enabled then
+        if not next(PlayerSettings.Fullbright.OriginalSettings) then
+            PlayerSettings.Fullbright.OriginalSettings = {
+                Brightness = Lighting.Brightness,
+                ClockTime = Lighting.ClockTime,
+                FogEnd = Lighting.FogEnd,
+                GlobalShadows = Lighting.GlobalShadows,
+                OutdoorAmbient = Lighting.OutdoorAmbient,
+                Ambient = Lighting.Ambient
+            }
+        end
         
-        -- 保存原始设置
-        Script.Temp.OriginalBrightness = Lighting.Brightness
-        Script.Temp.OriginalTime = Lighting.ClockTime
-        Script.Temp.OriginalFogEnd = Lighting.FogEnd
-        
-        -- 设置全亮
         Lighting.Brightness = 2
         Lighting.ClockTime = 14
         Lighting.FogEnd = 100000
-        Lighting.FogStart = 100000
         Lighting.GlobalShadows = false
-        
-        -- 监听设置变化
-        Script.Connections.Fullbright = Lighting.Changed:Connect(function()
-            if Toggles.Fullbright_Toggle.Value then
-                Lighting.Brightness = 2
-                Lighting.ClockTime = 14
-                Lighting.FogEnd = 100000
-                Lighting.FogStart = 100000
-                Lighting.GlobalShadows = false
-            end
-        end)
+        Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
     else
-        -- 恢复原始设置
-        if Script.Temp.OriginalBrightness then
-            Lighting.Brightness = Script.Temp.OriginalBrightness
-        end
-        if Script.Temp.OriginalTime then
-            Lighting.ClockTime = Script.Temp.OriginalTime
-        end
-        if Script.Temp.OriginalFogEnd then
-            Lighting.FogEnd = Script.Temp.OriginalFogEnd
-        end
-        
-        if Script.Connections.Fullbright then
-            Script.Connections.Fullbright:Disconnect()
-        end
-        
-        Script.Notify("全亮模式已禁用", 3)
-    end
-end)
-
--- 低画质模式
-Toggles.LowGFX_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("低画质模式已启用", 3)
-        
-        -- 保存原始设置
-        Script.Temp.OriginalQuality = settings().Rendering.QualityLevel
-        
-        -- 降低画质
-        settings().Rendering.QualityLevel = 1
-        
-        -- 降低材质质量
-        for _, part in ipairs(Workspace:GetDescendants()) do
-            if part:IsA("Part") or part:IsA("MeshPart") then
-                part.Material = Enum.Material.Plastic
-                part.Reflectance = 0
+        if next(PlayerSettings.Fullbright.OriginalSettings) then
+            for k, v in pairs(PlayerSettings.Fullbright.OriginalSettings) do
+                Lighting[k] = v
             end
+            PlayerSettings.Fullbright.OriginalSettings = {}
         end
-    else
-        -- 恢复画质
-        if Script.Temp.OriginalQuality then
-            settings().Rendering.QualityLevel = Script.Temp.OriginalQuality
-        end
-        
-        Script.Notify("低画质模式已禁用", 3)
     end
-end)
+end
 
--- 反虚空
-Toggles.AntiVoid_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("反虚空已启用", 3)
-        
-        -- 创建虚空检测平台
-        local antiVoidPart = Instance.new("Part")
-        antiVoidPart.Size = Vector3.new(10000, 5, 10000)
-        antiVoidPart.Position = Vector3.new(0, 0, 0)
-        antiVoidPart.Transparency = 0.5
-        antiVoidPart.Color = Color3.fromRGB(0, 255, 0)
-        antiVoidPart.Anchored = true
-        antiVoidPart.CanCollide = true
-        antiVoidPart.Name = "AntiVoidPlatform"
-        antiVoidPart.Parent = Workspace
-        
-        Script.Maid.AntiVoidPart = antiVoidPart
-        
-        -- 位置更新
-        Script.Connections.AntiVoid = RunService.Heartbeat:Connect(function()
-            local character = LocalPlayer.Character
-            if character then
-                local root = character:FindFirstChild("HumanoidRootPart")
-                if root and root.Position.Y < 0 then
-                    root.CFrame = CFrame.new(0, 50, 0)
-                end
-            end
-        end)
-    else
-        -- 清理
-        if Script.Maid.AntiVoidPart then
-            Script.Maid.AntiVoidPart:Destroy()
-        end
-        if Script.Connections.AntiVoid then
-            Script.Connections.AntiVoid:Disconnect()
-        end
-        
-        Script.Notify("反虚空已禁用", 3)
+RunService.Heartbeat:Connect(function()
+    applySpeed()
+    if PlayerSettings.Noclip.Enabled then
+        applyNoclip()
     end
-end)
-
--- 反布娃娃
-Toggles.AntiRagdoll_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("反布娃娃已启用", 3)
-        
-        Script.Connections.AntiRagdoll = RunService.Heartbeat:Connect(function()
-            local character = LocalPlayer.Character
-            if character then
-                -- 移除布娃娃文件夹
-                for _, folderName in pairs({"Ragdoll", "Stun", "InjuredWalking"}) do
-                    local folder = character:FindFirstChild(folderName)
-                    if folder then
-                        folder:Destroy()
-                    end
-                end
-                
-                -- 防止布娃娃状态
-                local humanoid = character:FindFirstChild("Humanoid")
-                if humanoid then
-                    humanoid.PlatformStand = false
-                end
-            end
-        end)
-    else
-        if Script.Connections.AntiRagdoll then
-            Script.Connections.AntiRagdoll:Disconnect()
-        end
-        Script.Notify("反布娃娃已禁用", 3)
+    if PlayerSettings.Fly.Enabled then
+        applyFly()
     end
-end)
-
--- 反击退
-Toggles.AntiFling_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("反击退已启用", 3)
-        
-        Script.Connections.AntiFling = RunService.Heartbeat:Connect(function()
-            local character = LocalPlayer.Character
-            if character then
-                -- 移除速度部件
-                for _, part in ipairs(character:GetDescendants()) do
-                    if part:IsA("BodyVelocity") or part:IsA("BodyAngularVelocity") then
-                        part:Destroy()
-                    end
-                end
-                
-                -- 限制速度
-                local root = character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    local velocity = root.Velocity
-                    if velocity.Magnitude > 100 then
-                        root.Velocity = velocity.Unit * 100
-                    end
-                end
-            end
-        end)
-    else
-        if Script.Connections.AntiFling then
-            Script.Connections.AntiFling:Disconnect()
-        end
-        Script.Notify("反击退已禁用", 3)
-    end
-end)
-
--- 反AFK
-Toggles.AntiAFK_Toggle:OnChanged(function(value)
-    if value then
-        Script.Notify("反AFK已启用", 3)
-        Script.Connections.AntiAFK = LocalPlayer.Idled:Connect(function()
-            VirtualUser:Button2Down(Vector2.new(0, 0), Camera.CFrame)
+    if PlayerSettings.AntiAfk.Enabled then
+        local VirtualUser = game:GetService("VirtualUser")
+        game:GetService("Players").LocalPlayer.Idled:Connect(function()
+            VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
             wait(1)
-            VirtualUser:Button2Up(Vector2.new(0, 0), Camera.CFrame)
+            VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
         end)
-    else
-        if Script.Connections.AntiAFK then
-            Script.Connections.AntiAFK:Disconnect()
-        end
-        Script.Notify("反AFK已禁用", 3)
     end
 end)
 
--- 移除布娃娃效果按钮
-local MiscGroup = Tabs.Misc:AddLeftGroupbox("实用功能")
-MiscGroup:AddButton("RemoveRagdoll", {
-    Text = "移除布娃娃效果",
-    Func = function()
-        local character = LocalPlayer.Character
-        if not character then return end
-        
-        for _, folderName in pairs({"Ragdoll", "Stun", "InjuredWalking"}) do
-            local folder = character:FindFirstChild(folderName)
-            if folder then
-                folder:Destroy()
-            end
-        end
-        
-        -- 修复骨骼
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.PlatformStand = false
-            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-        end
-        
-        Script.Notify("已移除布娃娃效果", 3)
+UserInputService.JumpRequest:Connect(function()
+    if PlayerSettings.InfiniteJump.Enabled and lplr.Character and lplr.Character:FindFirstChild("Humanoid") then
+        lplr.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end
+end)
+
+local mainTab = window:AddTab("主要功能")
+
+mainTab:AddLabel({
+    text = "欢迎使用墨水游戏多功能脚本",
+    size = 18
 })
 
--- 传送功能
-MiscGroup:AddDivider()
-MiscGroup:AddLabel("传送功能"):AddDivider()
+local gameCheatsGroup = mainTab:AddFolder("游戏作弊")
 
-MiscGroup:AddButton("Teleport_Safe", {
-    Text = "传送到安全点",
-    Func = function()
-        local character = LocalPlayer.Character
-        if character then
-            character:PivotTo(CFrame.new(Vector3.new(-108, 329.1, 462.1)))
-            Script.Notify("已传送到安全点", 3)
+gameCheatsGroup:AddToggle({
+    text = "自动获胜",
+    state = false,
+    callback = function(state)
+        CurrentGameCheats.AutoWin = state
+        if state then
+            Script.Functions.Alert("自动获胜已启用", 3)
         end
     end
 })
 
-MiscGroup:AddButton("Teleport_Back", {
-    Text = "传回到原位置",
-    Func = function()
-        if Script.Temp.LastPosition then
-            LocalPlayer.Character:PivotTo(Script.Temp.LastPosition)
-            Script.Notify("已传回原位置", 3)
+gameCheatsGroup:AddButton({
+    text = "通关红绿灯",
+    callback = Script.Functions.WinRLGL
+})
+
+gameCheatsGroup:AddButton({
+    text = "通关扣糖饼",
+    callback = Script.Functions.CompleteDalgonaGame
+})
+
+gameCheatsGroup:AddButton({
+    text = "显示玻璃桥",
+    callback = Script.Functions.RevealGlassBridge
+})
+
+gameCheatsGroup:AddButton({
+    text = "通关玻璃桥",
+    callback = Script.Functions.WinGlassBridge
+})
+
+local tugOfWarGroup = gameCheatsGroup:AddFolder("拔河设置")
+
+local autoPullEnabled = false
+tugOfWarGroup:AddToggle({
+    text = "自动拔河",
+    state = false,
+    callback = function(state)
+        autoPullEnabled = state
+        if state then
+            task.spawn(function()
+                while autoPullEnabled and not Script.Temp.Unloaded do
+                    Script.Functions.PullRope(true)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+tugOfWarGroup:AddToggle({
+    text = "完美拔河",
+    state = true,
+    callback = function(state)
+        CurrentGameCheats.PerfectPull = state
+    end
+})
+
+local playerEnhanceGroup = mainTab:AddFolder("玩家增强")
+
+playerEnhanceGroup:AddToggle({
+    text = "速度增强",
+    state = false,
+    callback = function(state)
+        PlayerSettings.Speed.Enabled = state
+        if state then
+            Script.Functions.Alert("速度增强已启用: " .. PlayerSettings.Speed.Value, 3)
         else
-            Script.Notify("没有保存的位置", 3)
-        end
-    end
-})
-
-MiscGroup:AddButton("Teleport_Hide", {
-    Text = "传送到隐藏点",
-    Func = function()
-        LocalPlayer.Character:PivotTo(CFrame.new(Vector3.new(229.9, 1005.3, 169.4)))
-        Script.Notify("已传送到隐藏点", 3)
-    end
-})
-
-MiscGroup:AddButton("Fix_Camera", {
-    Text = "修复相机",
-    Func = function()
-        if Camera then
-            Camera.CameraType = Enum.CameraType.Custom
-            if LocalPlayer.Character then
-                Camera.CameraSubject = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if lplr.Character and lplr.Character:FindFirstChild("Humanoid") then
+                lplr.Character.Humanoid.WalkSpeed = PlayerSettings.Speed.OldSpeed
             end
-            Script.Notify("相机已修复", 3)
+            Script.Functions.Alert("速度增强已禁用", 3)
         end
     end
 })
 
--- ================================
--- UI设置
--- ================================
-local MenuGroup = Tabs.UISettings:AddLeftGroupbox("菜单设置")
-
-MenuGroup:AddToggle("KeybindMenu_Toggle", {
-    Text = "显示按键绑定",
-    Default = false,
-    Callback = function(value)
-        Library.KeybindFrame.Visible = value
+playerEnhanceGroup:AddSlider({
+    text = "移动速度",
+    min = 16,
+    max = 100,
+    value = 30,
+    callback = function(value)
+        PlayerSettings.Speed.Value = value
+        if PlayerSettings.Speed.Enabled then
+            applySpeed()
+        end
     end
 })
 
-MenuGroup:AddToggle("CustomCursor_Toggle", {
-    Text = "自定义光标",
-    Default = true,
-    Callback = function(value)
-        Library.ShowCustomCursor = value
+playerEnhanceGroup:AddBind({
+    text = "速度快捷键",
+    key = Enum.KeyCode.C,
+    hold = false,
+    callback = function()
+        PlayerSettings.Speed.Enabled = not PlayerSettings.Speed.Enabled
+        playerEnhanceGroup:UpdateToggle("速度增强", PlayerSettings.Speed.Enabled)
+        if PlayerSettings.Speed.Enabled then
+            Script.Functions.Alert("速度增强已启用: " .. PlayerSettings.Speed.Value, 3)
+        else
+            Script.Functions.Alert("速度增强已禁用", 3)
+        end
     end
 })
 
-MenuGroup:AddDropdown("Notification_Side", {
-    Text = "通知位置",
-    Values = {"左侧", "右侧"},
-    Default = "右侧",
-    Callback = function(value)
-        Library:SetNotifySide(value == "左侧" and "Left" or "Right")
+playerEnhanceGroup:AddToggle({
+    text = "穿墙模式",
+    state = false,
+    callback = function(state)
+        PlayerSettings.Noclip.Enabled = state
+        if not state then
+            removeNoclip()
+        end
+        if state then
+            Script.Functions.Alert("穿墙模式已启用", 3)
+        else
+            Script.Functions.Alert("穿墙模式已禁用", 3)
+        end
     end
 })
 
-MenuGroup:AddDivider()
-
-MenuGroup:AddLabel("菜单快捷键"):AddKeyPicker("MenuKeybind", {
-    Default = "RightShift",
-    NoUI = true,
-    Text = "菜单快捷键"
-})
-
-MenuGroup:AddButton("Unload_Script", {
-    Text = "卸载脚本",
-    Func = function()
-        Library:Unload()
+playerEnhanceGroup:AddBind({
+    text = "穿墙快捷键",
+    key = Enum.KeyCode.N,
+    hold = false,
+    callback = function()
+        PlayerSettings.Noclip.Enabled = not PlayerSettings.Noclip.Enabled
+        playerEnhanceGroup:UpdateToggle("穿墙模式", PlayerSettings.Noclip.Enabled)
+        if not PlayerSettings.Noclip.Enabled then
+            removeNoclip()
+        end
+        if PlayerSettings.Noclip.Enabled then
+            Script.Functions.Alert("穿墙模式已启用", 3)
+        else
+            Script.Functions.Alert("穿墙模式已禁用", 3)
+        end
     end
 })
 
-MenuGroup:AddButton("Save_Settings", {
-    Text = "保存设置",
-    Func = function()
-        SaveManager:Save()
-        Script.Notify("设置已保存", 3)
+playerEnhanceGroup:AddToggle({
+    text = "无限跳跃",
+    state = false,
+    callback = function(state)
+        PlayerSettings.InfiniteJump.Enabled = state
+        if state then
+            Script.Functions.Alert("无限跳跃已启用", 3)
+        else
+            Script.Functions.Alert("无限跳跃已禁用", 3)
+        end
     end
 })
 
--- ================================
--- 初始化
--- ================================
+playerEnhanceGroup:AddToggle({
+    text = "飞行模式",
+    state = false,
+    callback = function(state)
+        PlayerSettings.Fly.Enabled = state
+        if state then
+            Script.Functions.Alert("飞行模式已启用", 3)
+        else
+            Script.Functions.Alert("飞行模式已禁用", 3)
+        end
+    end
+})
 
--- 设置菜单快捷键
-Library.ToggleKeybind = Options.MenuKeybind
+playerEnhanceGroup:AddSlider({
+    text = "飞行速度",
+    min = 10,
+    max = 100,
+    value = 40,
+    callback = function(value)
+        PlayerSettings.Fly.Speed = value
+    end
+})
 
--- 配置主题管理器
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
+playerEnhanceGroup:AddToggle({
+    text = "反虚空",
+    state = false,
+    callback = function(state)
+        PlayerSettings.AntiVoid.Enabled = state
+        applyAntiVoid()
+        if state then
+            Script.Functions.Alert("反虚空已启用", 3)
+        else
+            Script.Functions.Alert("反虚空已禁用", 3)
+        end
+    end
+})
 
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({"MenuKeybind"})
+playerEnhanceGroup:AddToggle({
+    text = "反挂机",
+    state = true,
+    callback = function(state)
+        PlayerSettings.AntiAfk.Enabled = state
+        if state then
+            Script.Functions.Alert("反挂机已启用", 3)
+        else
+            Script.Functions.Alert("反挂机已禁用", 3)
+        end
+    end
+})
 
-ThemeManager:SetFolder("YirdeX_Scripts")
-SaveManager:SetFolder("YirdeX_Scripts/Configs")
+playerEnhanceGroup:AddToggle({
+    text = "反布娃娃",
+    state = false,
+    callback = function(state)
+        if state then
+            Script.Functions.BypassRagdoll()
+            task.spawn(function()
+                while state and not Script.Temp.Unloaded do
+                    Script.Functions.BypassRagdoll()
+                    task.wait(0.1)
+                end
+            end)
+            Script.Functions.Alert("反布娃娃已启用", 3)
+        else
+            Script.Functions.Alert("反布娃娃已禁用", 3)
+        end
+    end
+})
 
--- 构建配置菜单
-SaveManager:BuildConfigSection(Tabs.UISettings)
+local espTab = window:AddTab("ESP绘制")
 
--- 应用主题
-ThemeManager:ApplyToTab(Tabs.UISettings)
+local playerESPGroup = espTab:AddFolder("玩家ESP")
 
--- 加载自动加载的配置
-SaveManager:LoadAutoloadConfig()
+local playerESPEnabled = false
+local playerESPColor = Color3.fromRGB(255, 255, 255)
+playerESPGroup:AddToggle({
+    text = "玩家ESP",
+    state = false,
+    callback = function(state)
+        playerESPEnabled = state
+        if state then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= lplr and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                    Script.Functions.ESP({
+                        Type = "Player",
+                        Object = player.Character,
+                        Text = player.DisplayName,
+                        Color = playerESPColor,
+                        Offset = Vector3.new(0, 3, 0)
+                    })
+                end
+            end
+            Script.Functions.Alert("玩家ESP已启用", 3)
+        else
+            for _, esp in pairs(Script.ESPTable.Player) do
+                esp.Destroy()
+            end
+            Script.ESPTable.Player = {}
+            Script.Functions.Alert("玩家ESP已禁用", 3)
+        end
+    end
+})
 
--- 加载完成提示
-task.spawn(function()
-    wait(1)
-    Script.Notify("YirdeX墨水游戏脚本加载完成！", 5)
-end)
+playerESPGroup:AddColor({
+    text = "玩家颜色",
+    color = Color3.fromRGB(255, 255, 255),
+    callback = function(color)
+        playerESPColor = color
+        for _, esp in pairs(Script.ESPTable.Player) do
+            esp.SetColor(color)
+        end
+    end
+})
 
--- 卸载清理
-Library:OnUnload(function()
-    Script.Cleanup()
-    getgenv().YirdeX_InkGame_Loaded = false
-    Script.Notify("脚本已卸载", 3)
+local hideSeekESPGroup = espTab:AddFolder("捉迷藏ESP")
+
+local hiderESPEnabled = false
+local hiderESPColor = Color3.fromRGB(0, 255, 0)
+hideSeekESPGroup:AddToggle({
+    text = "隐藏者ESP",
+    state = false,
+    callback = function(state)
+        hiderESPEnabled = state
+        if state then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player:GetAttribute("IsHider") and player.Character then
+                    Script.Functions.ESP({
+                        Type = "Hider",
+                        Object = player.Character,
+                        Text = player.Name .. " (Hider)",
+                        Color = hiderESPColor,
+                        Offset = Vector3.new(0, 3, 0)
+                    })
+                end
+            end
+            Script.Functions.Alert("隐藏者ESP已启用", 3)
+        else
+            for _, esp in pairs(Script.ESPTable.Hider) do
+                esp.Destroy()
+            end
+            Script.ESPTable.Hider = {}
+            Script.Functions.Alert("隐藏者ESP已禁用", 3)
+        end
+    end
+})
+
+hideSeekESPGroup:AddColor({
+    text = "隐藏者颜色",
+    color = Color3.fromRGB(0, 255, 0),
+    callback = function(color)
+        hiderESPColor = color
+        for _, esp in pairs(Script.ESPTable.Hider) do
+            esp.SetColor(color)
+        end
+    end
+})
+
+local seekerESPEnabled = false
+local seekerESPColor = Color3.fromRGB(255, 0, 0)
+hideSeekESPGroup:AddToggle({
+    text = "寻找者ESP",
+    state = false,
+    callback = function(state)
+        seekerESPEnabled = state
+        if state then
+            for _, player in pairs(Players:GetPlayers()) do
+                if not player:GetAttribute("IsHider") and player.Character then
+                    Script.Functions.ESP({
+                        Type = "Seeker",
+                        Object = player.Character,
+                        Text = player.Name .. " (Seeker)",
+                        Color = seekerESPColor,
+                        Offset = Vector3.new(0, 3, 0)
+                    })
+                end
+            end
+            Script.Functions.Alert("寻找者ESP已启用", 3)
+        else
+            for _, esp in pairs(Script.ESPTable.Seeker) do
+                esp.Destroy()
+            end
+            Script.ESPTable.Seeker = {}
+            Script.Functions.Alert("寻找者ESP已禁用", 3)
+        end
+    end
+})
+
+hideSeekESPGroup:AddColor({
+    text = "寻找者颜色",
+    color = Color3.fromRGB(255, 0, 0),
+    callback = function(color)
+        seekerESPColor = color
+        for _, esp in pairs(Script.ESPTable.Seeker) do
+            esp.SetColor(color)
+        end
+    end
+})
+
+local espSettingsGroup = espTab:AddFolder("ESP设置")
+
+espSettingsGroup:AddToggle({
+    text = "显示距离",
+    state = true,
+    callback = function(state)
+        ESPConfig.ShowDistance = state
+        updateESPConfig()
+    end
+})
+
+espSettingsGroup:AddToggle({
+    text = "高亮绘制",
+    state = true,
+    callback = function(state)
+        ESPConfig.Highlight = state
+        updateESPConfig()
+    end
+})
+
+espSettingsGroup:AddSlider({
+    text = "填充透明度",
+    min = 0,
+    max = 100,
+    value = 75,
+    callback = function(value)
+        ESPConfig.FillTransparency = value / 100
+        updateESPConfig()
+    end
+})
+
+espSettingsGroup:AddSlider({
+    text = "边缘透明度",
+    min = 0,
+    max = 100,
+    value = 0,
+    callback = function(value)
+        ESPConfig.OutlineTransparency = value / 100
+        updateESPConfig()
+    end
+})
+
+espSettingsGroup:AddSlider({
+    text = "文字大小",
+    min = 16,
+    max = 26,
+    value = 22,
+    callback = function(value)
+        ESPConfig.TextSize = value
+        updateESPConfig()
+    end
+})
+
+local combatTab = window:AddTab("战斗功能")
+
+local killauraGroup = combatTab:AddFolder("杀戮光环")
+
+local killauraEnabled = false
+local killauraRange = 15
+local killauraFaceTarget = true
+killauraGroup:AddToggle({
+    text = "杀戮光环",
+    state = false,
+    callback = function(state)
+        killauraEnabled = state
+        if state then
+            task.spawn(function()
+                while killauraEnabled and not Script.Temp.Unloaded do
+                    local target = getNearestEnemy(killauraRange)
+                    if target and lplr.Character and lplr.Character:FindFirstChild("HumanoidRootPart") then
+                        if killauraFaceTarget then
+                            local look = (target.Position - lplr.Character.HumanoidRootPart.Position).Unit
+                            lplr.Character.HumanoidRootPart.CFrame = CFrame.new(lplr.Character.HumanoidRootPart.Position, lplr.Character.HumanoidRootPart.Position + look)
+                        end
+                        local args = {
+                            CFrame.new(lplr.Character.HumanoidRootPart.Position)
+                        }
+                        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("rootCFrame"):FireServer(unpack(args))
+                    end
+                    task.wait(0.5)
+                end
+            end)
+            Script.Functions.Alert("杀戮光环已启用", 3)
+        else
+            Script.Functions.Alert("杀戮光环已禁用", 3)
+        end
+    end
+})
+
+killauraGroup:AddToggle({
+    text = "静默自瞄",
+    state = true,
+    callback = function(state)
+        killauraFaceTarget = state
+    end
+})
+
+killauraGroup:AddSlider({
+    text = "攻击范围",
+    min = 5,
+    max = 30,
+    value = 15,
+    callback = function(value)
+        killauraRange = value
+    end
+})
+
+local aimbotGroup = combatTab:AddFolder("自瞄设置")
+
+local guardAimbotEnabled = false
+local playerAimbotEnabled = false
+local aimbotSpeed = 0.2
+local aimbotWallcheck = true
+local aimbotConnection = nil
+
+local function updateAimbot()
+    if aimbotConnection then
+        aimbotConnection:Disconnect()
+        aimbotConnection = nil
+    end
+    
+    if guardAimbotEnabled or playerAimbotEnabled then
+        aimbotConnection = RunService.RenderStepped:Connect(function()
+            if not (guardAimbotEnabled or playerAimbotEnabled) or not lplr.Character then return end
+            
+            local target = nil
+            if guardAimbotEnabled then
+                target = getNearestGuard(100)
+            end
+            
+            if playerAimbotEnabled and not target then
+                target = getNearestEnemy(100)
+            end
+            
+            if target then
+                local look = (target.Position - camera.CFrame.Position).Unit
+                camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, camera.CFrame.Position + look), aimbotSpeed)
+            end
+        end)
+    end
+end
+
+aimbotGroup:AddToggle({
+    text = "瞄准守卫",
+    state = false,
+    callback = function(state)
+        guardAimbotEnabled = state
+        updateAimbot()
+    end
+})
+
+aimbotGroup:AddToggle({
+    text = "瞄准玩家",
+    state = false,
+    callback = function(state)
+        playerAimbotEnabled = state
+        updateAimbot()
+    end
+})
+
+aimbotGroup:AddToggle({
+    text = "墙壁检测",
+    state = true,
+    callback = function(state)
+        aimbotWallcheck = state
+    end
+})
+
+aimbotGroup:AddSlider({
+    text = "自瞄速度",
+    min = 1,
+    max = 100,
+    value = 20,
+    callback = function(value)
+        aimbotSpeed = value / 100
+    end
+})
+
+local utilityTab = window:AddTab("辅助功能")
+
+local visualGroup = utilityTab:AddFolder("视觉设置")
+
+visualGroup:AddToggle({
+    text = "全亮视野",
+    state = false,
+    callback = function(state)
+        PlayerSettings.Fullbright.Enabled = state
+        applyFullbright()
+        if state then
+            Script.Functions.Alert("全亮视野已启用", 3)
+        else
+            Script.Functions.Alert("全亮视野已禁用", 3)
+        end
+    end
+})
+
+local customFOVEnabled = false
+local customFOVValue = 60
+local originalFOV = 70
+visualGroup:AddToggle({
+    text = "自定义视角",
+    state = false,
+    callback = function(state)
+        customFOVEnabled = state
+        if state then
+            originalFOV = camera.FieldOfView
+            camera.FieldOfView = customFOVValue
+            Script.Functions.Alert("自定义视角已启用: " .. customFOVValue, 3)
+        else
+            camera.FieldOfView = originalFOV
+            Script.Functions.Alert("自定义视角已禁用", 3)
+        end
+    end
+})
+
+visualGroup:AddSlider({
+    text = "视角大小",
+    min = 10,
+    max = 120,
+    value = 60,
+    callback = function(value)
+        customFOVValue = value
+        if customFOVEnabled then
+            camera.FieldOfView = value
+        end
+    end
+})
+
+local performanceGroup = utilityTab:AddFolder("性能优化")
+
+performanceGroup:AddToggle({
+    text = "低画质模式",
+    state = false,
+    callback = function(state)
+        if state then
+            pcall(function()
+                settings().Rendering.QualityLevel = 1
+            end)
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 9e9
+            Script.Functions.Alert("低画质模式已启用", 3)
+        else
+            pcall(function()
+                settings().Rendering.QualityLevel = 10
+            end)
+            Lighting.GlobalShadows = true
+            Lighting.FogEnd = 1000
+            Script.Functions.Alert("低画质模式已禁用", 3)
+        end
+    end
+})
+
+performanceGroup:AddButton({
+    text = "清除特效缓存",
+    callback = function()
+        if workspace:FindFirstChild("Effects") then
+            workspace.Effects:ClearAllChildren()
+            Script.Functions.Alert("特效缓存已清除", 3)
+        end
+    end
+})
+
+local infoTab = window:AddTab("脚本信息")
+
+infoTab:AddLabel({
+    text = "墨水游戏多功能整合脚本",
+    size = 20
+})
+
+infoTab:AddLabel({
+    text = "整合NOL和地岩版本功能"
+})
+
+infoTab:AddLabel({
+    text = "使用NexusUI界面"
+})
+
+infoTab:AddButton({
+    text = "加入Discord服务器",
+    callback = Script.Functions.JoinDiscordServer
+})
+
+infoTab:AddButton({
+    text = "修复视角",
+    callback = Script.Functions.FixCamera
+})
+
+infoTab:AddButton({
+    text = "卸载脚本",
+    callback = function()
+        Script.Temp.Unloaded = true
+        
+        for _, conn in pairs(Script.Connections) do
+            pcall(conn.Disconnect, conn)
+        end
+        
+        for _, espType in pairs(Script.ESPTable) do
+            for _, esp in pairs(espType) do
+                pcall(esp.Destroy)
+            end
+        end
+        
+        if PlayerSettings.Fly.BodyVelocity then
+            PlayerSettings.Fly.BodyVelocity:Destroy()
+        end
+        
+        if PlayerSettings.AntiVoid.Part then
+            PlayerSettings.AntiVoid.Part:Destroy()
+        end
+        
+        applyFullbright()
+        
+        if lplr.Character and lplr.Character:FindFirstChild("Humanoid") then
+            lplr.Character.Humanoid.WalkSpeed = PlayerSettings.Speed.OldSpeed
+        end
+        
+        removeNoclip()
+        
+        getgenv().voidware_loaded = false
+        shared.Voidware_InkGame_Library = nil
+        
+        window:Destroy()
+        Script.Functions.Alert("脚本已卸载", 3)
+    end
+})
+
+local settingsTab = window:AddTab("设置")
+
+settingsTab:AddLabel({
+    text = "UI设置"
+})
+
+settingsTab:AddBind({
+    text = "显示/隐藏菜单",
+    key = Enum.KeyCode.RightShift,
+    hold = false,
+    callback = function()
+        window:Toggle()
+    end
+})
+
+settingsTab:AddToggle({
+    text = "显示自定义光标",
+    state = true,
+    callback = function(state)
+        NexusLibrary.ShowCustomCursor = state
+    end
+})
+
+settingsTab:AddToggle({
+    text = "显示按键绑定菜单",
+    state = false,
+    callback = function(state)
+        NexusLibrary.KeybindFrame.Visible = state
+    end
+})
+
+settingsTab:AddButton({
+    text = "保存设置",
+    callback = function()
+        pcall(function()
+            local settings = {
+                PlayerSettings = PlayerSettings,
+                ESPConfig = ESPConfig,
+                GameCheats = CurrentGameCheats
+            }
+            writefile("voidware_linoria/ink_game/settings/nexusui.json", HttpService:JSONEncode(settings))
+            Script.Functions.Alert("设置已保存", 3)
+        end)
+    end
+})
+
+settingsTab:AddButton({
+    text = "加载设置",
+    callback = function()
+        pcall(function()
+            if isfile("voidware_linoria/ink_game/settings/nexusui.json") then
+                local settings = HttpService:JSONDecode(readfile("voidware_linoria/ink_game/settings/nexusui.json"))
+                PlayerSettings = settings.PlayerSettings or PlayerSettings
+                ESPConfig = settings.ESPConfig or ESPConfig
+                CurrentGameCheats = settings.GameCheats or CurrentGameCheats
+                
+                updateESPConfig()
+                applyFullbright()
+                Script.Functions.Alert("设置已加载", 3)
+            end
+        end)
+    end
+})
+
+settingsTab:AddButton({
+    text = "重置设置",
+    callback = function()
+        PlayerSettings = {
+            Speed = {Enabled = false, Value = 30, OldSpeed = 16},
+            Noclip = {Enabled = false, NoclipParts = {}},
+            Fly = {Enabled = false, Speed = 40, BodyVelocity = nil},
+            InfiniteJump = {Enabled = false},
+            AntiFling = {Enabled = false},
+            AntiVoid = {Enabled = false, Part = nil},
+            AntiAfk = {Enabled = true},
+            Fullbright = {Enabled = false, OriginalSettings = {}}
+        }
+        
+        ESPConfig = {
+            Highlight = true,
+            ShowDistance = true,
+            FillTransparency = 0.75,
+            OutlineTransparency = 0,
+            TextSize = 22
+        }
+        
+        CurrentGameCheats = {}
+        
+        updateESPConfig()
+        applyFullbright()
+        Script.Functions.Alert("设置已重置", 3)
+    end
+})
+
+window:Init()
+
+Script.Functions.Alert("墨水游戏多功能脚本已加载!", 5)
+task.delay(2, function()
+    Script.Functions.Alert("加入 discord.gg/voidware 获取更新", 5)
 end)
